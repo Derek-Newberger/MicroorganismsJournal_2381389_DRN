@@ -1,0 +1,419 @@
+---
+title: "Biomass_Statistics"
+author: "Derek Newberger"
+date: "9/28/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r data}
+CoverCropData <- read.csv("/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_Peach_Data/CC_Biomass_Data/CoverCropData.csv")
+# str(CoverCropData)
+```
+
+```{r}
+CropRotationBiomassData <- read.csv("/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_Peach_Data/CC_Biomass_Data/CropRotationBiomass.csv")
+```
+
+```{r}
+CropHalfData <- read.csv("/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_Peach_Data/CC_Biomass_Data/CoverCrop_Half.csv")
+```
+
+```{r}
+CoverCropDatreorder <- CoverCropData                                     # Replicate original data
+CoverCropDatreorder$Crop_Soil <- factor(CoverCropDatreorder$Crop_Soil,   # Change order manually
+                  levels = c("Alfalfa_Autoclaved","Alfalfa","Fescue_Autoclaved","Fescue","Corn_Autoclaved","Corn","Tomato_Autoclaved", "Tomato", "None_Autoclaved", "None"))
+```
+
+```{r}
+XSoillabs <- c("Autoclaved", "Control")
+XCoverCroplabs <- c("Alfalfa Autoclaved","Alfalfa ","Fescue Autoclaved","Fescue","Corn Autoclaved","Corn","Tomato Autoclaved", "Tomato", "No Crop Autoclaved", "No Crop")
+```
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(tidyverse)
+library(emmeans)
+library(ggthemes)
+library(multcompView)
+library(dplyr)
+```
+
+# Assumption Checks 
+
+For an ANOVA we need homogenous variance. The most common way to check is to use the 'plot()' function. 
+
+If your data are not normal/have heterogenous variance, then we need to transform the data. 
+
+The most common transformation is a log transformation, there's also square root, ln, cubic, etc. If you are stuck finding an appropriate transformaion, use the box cox method. This test finds a multiplier that will make your data most fit the assumptions of an ANOVA. Whatever assumption you use, be sure to include in your manuscript. 
+
+If there is no good fit to transform the data cleanly, consider non parametric methods of analysis. For an ANVOA analog, use the Kruskal Wallis test with the appropriate multiple comparison analog.
+
+```{r}
+lm_CropBiomass <- lm(Above_Biomass_g ~ Crop * Soil, data = CropRotationBiomassData) # soil treatment
+plot(lm_CropBiomass)
+```
+```{r}
+summary(lm_CropBiomass) #look at factor and level in R to change the reference 
+```
+From Stats lab:
+
+You can also look at https://www.geeksforgeeks.org/specify-reference-factor-level-in-linear-regression-in-r/#:~:text=The%20relevel()%20function%20is%20used%20to%20reorder%20the%20factor,level%20set%20by%20the%20user
+
+https://www.geeksforgeeks.org/specify-reference-factor-level-in-linear-regression-in-r/#:~:text=The%20relevel()%20function%20is%20used%20to%20reorder%20the%20factor,level%20set%20by%20the%20user
+
+```{r}
+lm_log_transformed_CropBiomass <- lm(log(Above_Biomass_g) ~ Crop * Soil, data = CropRotationBiomassData)
+plot(lm_log_transformed_CropBiomass)
+```
+
+```{r}
+lm_sqrt_transformed_CropBiomass <- lm(sqrt(Above_Biomass_g) ~ Soil * Crop, data = CropRotationBiomassData)
+plot(lm_sqrt_transformed_CropBiomass)
+```
+
+```{r}
+shapiro.test(residuals(lm_CropBiomass))
+plot(lm_CropBiomass)
+```
+```{r}
+shapiro.test(residuals(lm_log_transformed_CropBiomass))
+plot(lm_log_transformed_CropBiomass)
+```
+
+
+```{r}
+shapiro.test(residuals(lm_sqrt_transformed_CropBiomass))
+plot(lm_sqrt_transformed_CropBiomass)
+```
+
+```{r, warning=F}
+hist(residuals(lm_CropBiomass))
+```
+```{r}
+hist(residuals(lm_sqrt_transformed_CropBiomass))
+```
+
+```{r}
+lm_Biomass <- lm(Peach_Dry_Total ~ Soil * Crop, data = CoverCropData)
+plot(lm_Biomass)
+```
+
+```{r}
+lm_log_transformed_Biomass <- lm(log(Peach_Dry_Total) ~ Soil + Crop, data = CoverCropData)
+plot(lm_log_transformed_Biomass)
+```
+
+```{r}
+lm_sqrt_transformed_Biomass <- lm(sqrt(Peach_Dry_Total) ~ Soil + Crop, data = CoverCropData)
+plot(lm_sqrt_transformed_Biomass)
+```
+
+```{r}
+shapiro.test(residuals(lm_Biomass))
+plot(lm_Biomass)
+```
+
+```{r}
+shapiro.test(residuals(lm_log_transformed_Biomass))
+plot(lm_log_transformed_Biomass)
+```
+
+```{r}
+shapiro.test(residuals(lm_sqrt_transformed_Biomass))
+plot(lm_sqrt_transformed_Biomass)
+```
+
+```{r, warning=F}
+hist(residuals(lm_Biomass))
+```
+
+```{r}
+hist(residuals(lm_log_transformed_Biomass))
+```
+
+```{r}
+hist(residuals(lm_sqrt_transformed_Biomass))
+```
+
+```{r}
+kruskal.test(Above_Biomass_g ~ Soil, data = CoverCropData)
+kruskal.test(Peach_Dry_Total ~ Soil, data = CoverCropData)
+```
+
+```{r}
+pairwise.wilcox.test(CropRotationBiomassData$Above_Biomass_g, CropRotationBiomassData$Crop_Soil,
+                 p.adjust.method = "BH")
+```
+
+```{r CoverCropBiomassTreatment}
+# analysis of variance
+anovaDisruptionCC <- aov(Above_Biomass_g ~ Crop_Soil, data = CoverCropDatreorder)
+```
+```{r}
+# Tukey's test
+tukeyDisruptionCC <- TukeyHSD(anovaDisruptionCC)
+```
+```{r}
+# compact letter display
+cldDisruptionCC <- multcompLetters4(anovaDisruptionCC, tukeyDisruptionCC)
+```
+```{r}
+# table with factors and 3rd quantile
+dtDisruptionCC <- group_by(CoverCropDatreorder, Crop_Soil) %>%
+  summarise(w=mean(Above_Biomass_g), sd = sd(Above_Biomass_g)) %>%
+  arrange(desc(w))
+```
+```{r}
+# extracting the compact letter display and adding to the Tk table
+cldDisruptionCC <- as.data.frame.list(cldDisruptionCC$Crop_Soil)
+dtDisruptionCC$cldDisruptionCC <- cldDisruptionCC$Letters
+```
+```{r}
+print(dtDisruptionCC)
+```
+```{r}
+p.vals <- pairwise.wilcox.test(CropRotationBiomassData$Above_Biomass_g, CropRotationBiomassData$Crop_Soil,
+                 p.adjust.method = "BH")
+
+mat <- as.matrix(p.vals$p.value)
+myNames <- colnames(mat)
+myNames <- c(myNames, 'Alfalfa_disrupted')
+
+row1 <- rep(NA, 9)
+mat <- rbind(row1, mat)
+col1 <- rep(NA,10)
+mat <- cbind(mat, col1)
+colnames(mat) <- myNames
+row.names(mat) <- myNames
+
+#row.names(mat) <- c('', myNames)
+res <- multcompView::multcompLetters(mat)
+print(res)
+```
+
+```{r}
+BiomassCC <-ggplot(subset(dtDisruptionCC, Crop_Soil %in% c("Alfalfa", "Alfalfa_Autoclaved", "Fescue", "Fescue_Autoclaved", "Corn", "Corn_Autoclaved", "Tomato", "Tomato_Autoclaved" )), aes(Crop_Soil, w, fill = Crop_Soil)) +
+  geom_bar(stat = "identity") +
+    scale_fill_manual(labels=c('Alfalfa Autoclaved', 'Alfalfa','Fescue Autoclaved', 'Fescue', 'Corn Autoclaved', 'Corn', 'Tomato Autoclaved', 'Tomato'), 
+                      values = c("Alfalfa" = "darkorchid1",
+                               "Alfalfa_Autoclaved" = "darkorchid4",
+                               "Fescue" = "chartreuse",
+                               "Fescue_Autoclaved" = "chartreuse4",
+                               "Corn" = "gold",
+                               "Corn_Autoclaved" = "gold4",
+                               "Tomato" = "firebrick1",
+                               "Tomato_Autoclaved" = "firebrick4")) +
+  geom_errorbar(aes(ymin = w-sd, ymax=w+sd), width = 0.2) +
+  labs(x = "Soil Treatment", y = "Mean Fresh Above Biomass (g)") +
+  # geom_text(aes(label = cldDisruptionCC), vjust = -0.5, hjust = -0.5) +
+  theme_few() +
+  # ggtitle("Cover Crop Above Fresh Biomass") + 
+  labs(fill='Crop History') +
+  theme(plot.title = element_text(size=22)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, size=12, face="bold")) +
+  scale_x_discrete(labels= XCoverCroplabs) +
+  theme(axis.title=element_text(size=14,face="bold"))
+BiomassCC
+  ggsave(BiomassCC, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/BarplotBiomassCC.pdf', width=10, height=4.6)
+```
+
+
+# analysis of variance
+anovaDisruptionCRLog <- aov(Above_Biomass_Log ~ Crop_Soil, data = CropRotationBiomassData)
+
+# Tukey's test
+tukeyDisruptionCRLog <- TukeyHSD(anovaDisruptionCRLog)
+
+# compact letter display
+cldDisruptionCRLog <- multcompLetters4(anovaDisruptionCRLog, tukeyDisruptionCRLog)
+
+# table with factors and 3rd quantile
+dtDisruptionCRLog <- group_by(CropRotationBiomassData, Crop_Soil) %>%
+  summarise(w=mean(Above_Biomass_Log), sd = sd(Above_Biomass_Log)) %>%
+  arrange(desc(w))
+
+# extracting the compact letter display and adding to the Tk table
+cldDisruptionCRLog <- as.data.frame.list(cldDisruptionCRLog$Crop_Soil)
+dtDisruptionCRLog$cldDisruptionCRLog <- cldDisruptionCRLog$Letters
+
+print(dtDisruptionCRLog)
+
+
+ggplot(subset(dtDisruptionCRLog, Crop_Soil %in% c("Alfalfa_Autoclaved", "Alfalfa", "Fescue_Autoclaved", "Fescue", "Corn_Autoclaved", "Corn", "Tomato_Autoclaved", "Tomato" )), aes(Crop_Soil, w, fill = Crop_Soil)) +
+  geom_bar(stat = "identity") +
+    scale_fill_manual(labels=c('Alfalfa Autoclaved', 'Alfalfa','Fescue Autoclaved', 'Fescue', 'Corn Autoclaved', 'Corn', 'Tomato Autoclaved', 'Tomato'), 
+                      values = c("Alfalfa" = "darkorchid1",
+                               "Alfalfa_Autoclaved" = "darkorchid4",
+                               "Fescue" = "chartreuse",
+                               "Fescue_Autoclaved" = "chartreuse4",
+                               "Corn" = "gold",
+                               "Corn_Autoclaved" = "gold4",
+                               "Tomato" = "firebrick1",
+                               "Tomato_Autoclaved" = "firebrick4")) +
+  geom_errorbar(aes(ymin = w-sd, ymax=w+sd), width = 0.2) +
+  labs(x = "Soil Treatment", y = "Mean Fresh Above Biomass (g)") +
+  # geom_text(aes(label = cldDisruptionCC), vjust = -0.5, hjust = -0.5) +
+  theme_few() +
+  # ggtitle("Cover Crop Above Fresh Biomass") + 
+  labs(fill='Crop History') +
+  theme(plot.title = element_text(size=22)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, size=12, face="bold")) +
+  scale_x_discrete(labels= XCoverCroplabs) +
+  theme(axis.title=element_text(size=14,face="bold"))
+
+
+```{r PTotalDry}
+# analysis of variance
+anovaPTotalDry <- aov(Peach_Dry_Total ~ Crop_Soil, data = CoverCropData)
+```
+```{r}
+# Tukey's test
+tukeyPTotalDry <- TukeyHSD(anovaPTotalDry)
+```
+```{r}
+# compact letter display
+cldPTotalDry <- multcompLetters4(anovaPTotalDry, tukeyPTotalDry)
+```
+```{r}
+# table with factors and 3rd quantile
+dtPTotalDry <- group_by(CoverCropData, Crop_Soil) %>%
+  summarise(w=mean(Peach_Dry_Total), sd = sd(Peach_Dry_Total)) %>%
+  arrange(desc(w))
+```
+```{r}
+# extracting the compact letter display and adding to the Tk table
+cldPTotalDry <- as.data.frame.list(cldPTotalDry$Crop_Soil)
+dtPTotalDry$cldPTotalDry <- cldPTotalDry$Letters
+```
+```{r}
+print(dtPTotalDry)
+```
+
+```{r}
+p.valsPeach <- pairwise.wilcox.test(CoverCropData$Peach_Dry_Total, CoverCropData$Crop_Soil,
+                 p.adjust.method = "BH")
+
+mat <- as.matrix(p.valsPeach$p.value)
+myNames <- colnames(mat)
+myNames <- c(myNames, 'Tomato_disrupted')
+
+row1 <- rep(NA, 9)
+mat <- rbind(row1, mat)
+col1 <- rep(NA,10)
+mat <- cbind(mat, col1)
+colnames(mat) <- myNames
+row.names(mat) <- myNames
+
+#row.names(mat) <- c('', myNames)
+resPeach <- multcompView::multcompLetters(mat)
+print(resPeach)
+```
+
+```{r}
+dtPTotalDryreorder <- dtPTotalDry                                    # Replicate original data
+dtPTotalDryreorder$Crop_Soil <- factor(dtPTotalDryreorder$Crop_Soil,   # Change order manually
+                  levels = c("Alfalfa_Autoclaved","Alfalfa","Fescue_Autoclaved","Fescue","Corn_Autoclaved","Corn","Tomato_Autoclaved", "Tomato", "None_Autoclaved", "None"))
+
+BiomassP <-ggplot(dtPTotalDryreorder, aes(Crop_Soil, w, fill = Crop_Soil)) +
+  #geom_bar(stat = "identity", aes(fill = w), show.legend = FALSE) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(labels=c('Alfalfa Autoclaved', 'Alfalfa','Fescue Autoclaved', 'Fescue', 'Corn Autoclaved', 'Corn', 'Tomato Autoclaved', 'Tomato', 'No Crop Autoclaved', 'No Crop'), values = c("Alfalfa" = "darkorchid1",
+                               "Alfalfa_Autoclaved" = "darkorchid4",
+                               "Fescue" = "chartreuse",
+                               "Fescue_Autoclaved" = "chartreuse4",
+                               "Corn" = "gold",
+                               "Corn_Autoclaved" = "gold4",
+                               "Tomato" = "firebrick1",
+                               "Tomato_Autoclaved" = "firebrick4",
+                               "None" = "grey69",
+                               "None_Autoclaved" = "grey49")) +
+  geom_errorbar(aes(ymin = w-sd, ymax=w+sd), width = 0.2) +
+  labs(x = "Crop and Soil Treatment", y = "Mean Biomass (g)") +
+  # geom_text(aes(label = cldPTotalDry), vjust = -0.5, hjust = -0.5) +
+  theme_few() +
+  ylim(0,7) +
+  # ggtitle("Total Dry Peach Biomass") + 
+  labs(fill='Crop History') +
+    # geom_text(aes(label = cldPTotalDry), vjust = -0.5, hjust = -0.5) +
+  theme(plot.title = element_text(size=22)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, size=12, face="bold")) +
+  scale_x_discrete(labels= XCoverCroplabs) +
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"))
+BiomassP
+  ggsave(BiomassP, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/BarplotBiomassP.pdf', width=11.5, height=4.6)
+```
+
+```{r}
+pairwise.wilcox.test(CoverCropData$Peach_Dry_Total, CoverCropData$Crop_Soil,
+                 p.adjust.method = "BH")
+```
+
+```{r}
+pairwise.wilcox.test(CropHalfData$Peach_Dry_Total, CropHalfData$Crop,
+                 p.adjust.method = "BH")
+```
+
+
+```{r PTotalDry}
+# analysis of variance
+anovaPHeight <- aov(Peach_Tree_Height_Difference ~ Crop_Soil, data = CoverCropData)
+```
+```{r}
+# Tukey's test
+tukeyPHeight <- TukeyHSD(anovaPHeight)
+```
+```{r}
+# compact letter display
+cldPHeight <- multcompLetters4(anovaPHeight, tukeyPHeight)
+```
+```{r}
+# table with factors and 3rd quantile
+dtPHeight <- group_by(CoverCropData, Crop_Soil) %>%
+  summarise(w=mean(Peach_Tree_Height_Difference), sd = sd(Peach_Tree_Height_Difference)) %>%
+  arrange(desc(w))
+```
+```{r}
+# extracting the compact letter display and adding to the Tk table
+cldPHeight <- as.data.frame.list(cldPHeight$Crop_Soil)
+dtPHeight$cldPHeight <- cldPHeight$Letters
+```
+```{r}
+print(dtPHeight)
+```
+
+```{r}
+dtPHeightreorder <- dtPHeight                                    # Replicate original data
+dtPHeightreorder$Crop_Soil <- factor(dtPHeightreorder$Crop_Soil,   # Change order manually
+                  levels = c("Alfalfa_Autoclaved","Alfalfa","Fescue_Autoclaved","Fescue","Corn_Autoclaved","Corn","Tomato_Autoclaved", "Tomato", "None_Autoclaved", "None"))
+
+ggplot(dtPHeightreorder, aes(Crop_Soil, w, fill = Crop_Soil)) +
+  #geom_bar(stat = "identity", aes(fill = w), show.legend = FALSE) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(labels=c('Alfalfa Autoclaved', 'Alfalfa','Fescue Autoclaved', 'Fescue', 'Corn Autoclaved', 'Corn', 'Tomato Autoclaved', 'Tomatod', 'No Crop Autoclaved', 'No Crop'), values = c("Alfalfa" = "darkorchid1",
+                               "Alfalfa_Autoclaved" = "darkorchid4",
+                               "Fescue" = "chartreuse",
+                               "Fescue_Autoclavedd" = "chartreuse4",
+                               "Corn" = "gold",
+                               "Corn_Autoclaved" = "gold4",
+                               "Tomato" = "firebrick1",
+                               "Tomato_Autoclaved" = "firebrick4",
+                               "None" = "grey69",
+                               "None_Autoclaved" = "grey49")) +
+  geom_errorbar(aes(ymin = w-sd, ymax=w+sd), width = 0.2) +
+  labs(x = "Crop and Soil Treatment", y = "Height Difference (Final- Initial) (cm)") +
+  geom_text(aes(label = cldPHeight), vjust = -0.5, hjust = -0.5) +
+  theme_few() +
+  # ggtitle("Height Difference After 12? weeks") + 
+  labs(fill='Crop History') +
+  theme(plot.title = element_text(size=22)) +
+  theme(axis.text.x = element_text(angle = 45, hjust=1, size=12, face="bold")) +
+  scale_x_discrete(labels= XCoverCroplabs) +
+  theme(axis.text=element_text(size=12),
+        axis.title=element_text(size=14,face="bold"))
+```

@@ -1,0 +1,1208 @@
+---
+title: "Differential_Abundance"
+author: "Derek Newberger"
+date: "11/1/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, echo=FALSE, message=FALSE, warning=FALSE}
+library(egg)
+library(SciViews)
+library(dunn.test)
+library(MASS)
+library(car)
+library(emmeans)
+library(multcomp)
+library(multcompView)
+library(knitr)
+library(BiocManager)
+library(DESeq2)
+library(locfit)
+library(microbiomeMarker)
+library(devtools)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(metacoder)
+library(phyloseq)
+library(MicEco)
+library(reticulate)
+library(RColorBrewer)
+library(readxl)
+library(tidyverse)
+library(ggVennDiagram)
+```
+
+```{r myFunctions_setup, echo=FALSE}
+source("myFunctions.R")
+```
+
+```{r import}
+# use custom emu_to_phyloseq function to create phyl
+P.A <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC1Data/EMU.rel_abund.finalCC1.csv',
+                                              meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC1Data/demultiplex_PeachCC1.xlsx', 
+                       sheet='PeachCCA', range='A1:V83',
+                       sample_names='name',
+                       run_name='PeachCCA')
+
+P.B <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC2Data/EMU.rel_abund.finalCC2.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC2Data/demultiplex_CC2.xlsx', 
+                       sheet='PeachCCB', range='A1:V85',
+                       sample_names='name',
+                       run_name='PeachCCB')
+
+P.C <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC3_DD2_Data/EMU.rel_abund.finalCC3.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC3_DD2_Data/demultiplex_CC3.xlsx', 
+                       sheet='PeachCCC', range='A1:V43',
+                       sample_names='name',
+                       run_name='PeachCCC')
+
+P.D <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC4Data/EMU.rel_abund.finalCC4.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC4Data/demultiplex_PeachCC4.xlsx', 
+                       sheet='PeachCCD', range='A1:V23',
+                       sample_names='name',
+                       run_name='PeachCCD')
+
+# merge all imported datasets
+P.rel <- merge_phyloseq(P.A, P.B,P.C,P.D)
+```
+
+```{r import2}
+# save combined relative abundance phyloseq object
+saveRDS(P.rel, '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+
+# convert EMU rel abundances to count data using final number of sequence reads
+P.count <- P.rel
+for (n in 1:nsamples(P.count)) {
+  otu_table(P.count)[,n] <- round(otu_table(P.count)[,n] * sample_data(P.count)$final[n], 0)
+}
+
+# save combined count phyloseq object
+saveRDS(P.count, '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countCCautoclaved <- subset_samples(P.count, Compartment_Soil == 'Cover_Crop_Autoclaved')
+
+colnames(tax_table(P.countCCautoclaved)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+Species_CC_autoclavedAT <- microbiomeMarker::run_deseq2(
+           P.countCCautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Alfalfa", "Tomato"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_autoclavedAT)
+```
+
+```{r}
+Species_CC_autoclavedAF <- microbiomeMarker::run_deseq2(
+           P.countCCautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Alfalfa", "Fescue"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_autoclavedAF)
+```
+
+```{r}
+Species_CC_autoclavedAC <- microbiomeMarker::run_deseq2(
+           P.countCCautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Alfalfa", "Corn"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_autoclavedAC)
+```
+```{r}
+Species_CC_autoclavedAN <- microbiomeMarker::run_deseq2(
+           P.countCCautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Alfalfa", "No_Plant"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_autoclavedAN)
+```
+
+```{r}
+Species_CC_autoclavedTF <- microbiomeMarker::run_deseq2(
+           P.countCCautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Tomato", "Fescue"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_autoclavedTF)
+```
+
+```{r}
+Species_CC_autoclavedTC <- microbiomeMarker::run_deseq2(
+           P.countCCautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Tomato", "Corn"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_autoclavedTC)
+```
+
+```{r}
+Species_CC_autoclavedTN <- microbiomeMarker::run_deseq2(
+           P.countCCautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Tomato", "No_Plant"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_autoclavedTN)
+```
+
+```{r}
+Species_CC_autoclavedFC <- microbiomeMarker::run_deseq2(
+           P.countCCautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fescue", "Corn"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_autoclavedFC)
+```
+
+```{r}
+Species_CC_autoclavedFN <- microbiomeMarker::run_deseq2(
+           P.countCCautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Fescue", "No_Plant"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_autoclavedFN)
+```
+
+```{r}
+Species_CC_autoclavedNC <- microbiomeMarker::run_deseq2(
+           P.countCCautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("No_Plant", "Corn"),
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_autoclavedNC)
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countCC <- subset_samples(P.count, Compartment_Crop_Type == 'Cover_Crop')
+
+colnames(tax_table(P.countCC)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+diagdds = phyloseq_to_deseq2(P.countCC, ~ Soil_Treatment)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.01
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(P.countCC)[rownames(sigtab), ], "matrix"))
+head(sigtab)
+```
+```{r}
+library("ggplot2")
+theme_set(theme_bw())
+scale_fill_discrete <- function(palname = "Set1", ...) {
+    scale_fill_brewer(palette = palname, ...)
+}
+# Phylum order
+x = tapply(sigtab$log2FoldChange, sigtab$Phylum, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Phylum = factor(as.character(sigtab$Phylum), levels=names(x))
+# Genus order
+x = tapply(sigtab$log2FoldChange, sigtab$Genus, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Genus = factor(as.character(sigtab$Genus), levels=names(x))
+ggplot(sigtab, aes(x=Genus, y=log2FoldChange, color=Phylum)) + geom_point(size=6) + 
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5))
+```
+```{r}
+library("ggplot2")
+theme_set(theme_bw())
+scale_fill_discrete <- function(palname = "Set1", ...) {
+    scale_fill_brewer(palette = palname, ...)
+}
+# Phylum order
+x = tapply(sigtab$log2FoldChange, sigtab$Phylum, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Phylum = factor(as.character(sigtab$Phylum), levels=names(x))
+# Family order
+x = tapply(sigtab$log2FoldChange, sigtab$Family, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Family = factor(as.character(sigtab$Family), levels=names(x))
+ggplot(sigtab, aes(x=Family, y=log2FoldChange, color=Phylum)) + geom_point(size=6) + 
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5))
+```
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countRhzNonautoclaved <- subset_samples(P.count, Compartment_Soil == 'Peach_Rhizosphere_NonAutoclaved')
+
+colnames(tax_table(P.countRhzNonautoclaved)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+diagdds = phyloseq_to_deseq2(P.countRhzNonautoclaved, ~ Cover_Crop_History)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.01
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(P.countRhzNonautoclaved)[rownames(sigtab), ], "matrix"))
+head(sigtab)
+```
+```{r}
+library("ggplot2")
+theme_set(theme_bw())
+scale_fill_discrete <- function(palname = "Set1", ...) {
+    scale_fill_brewer(palette = palname, ...)
+}
+# Phylum order
+x = tapply(sigtab$log2FoldChange, sigtab$Phylum, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Phylum = factor(as.character(sigtab$Phylum), levels=names(x))
+# Species order
+x = tapply(sigtab$log2FoldChange, sigtab$Species, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Species = factor(as.character(sigtab$Species), levels=names(x))
+ggplot(sigtab, aes(x=Species, y=log2FoldChange, color=Phylum)) + geom_point(size=6) + 
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5))
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countAControl <- subset_samples(P.count, Alfalfa_Control == 'Alfalfa_Control')
+
+colnames(tax_table(P.countAControl)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+diagdds = phyloseq_to_deseq2(P.countAControl, ~ Cover_Crop_History)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.01
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(P.countAControl)[rownames(sigtab), ], "matrix"))
+head(sigtab)
+```
+
+```{r}
+library("ggplot2")
+theme_set(theme_bw())
+scale_fill_discrete <- function(palname = "Set1", ...) {
+    scale_fill_brewer(palette = palname, ...)
+}
+# Phylum order
+x = tapply(sigtab$log2FoldChange, sigtab$Phylum, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Phylum = factor(as.character(sigtab$Phylum), levels=names(x))
+# Species order
+x = tapply(sigtab$log2FoldChange, sigtab$Species, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Species = factor(as.character(sigtab$Species), levels=names(x))
+ggplot(sigtab, aes(x=Species, y=log2FoldChange, color=Phylum)) + geom_point(size=6) + 
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5))
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countFControl <- subset_samples(P.count, Fescue_Control == 'Fescue_Control')
+
+colnames(tax_table(P.countFControl)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+diagdds = phyloseq_to_deseq2(P.countFControl, ~ Cover_Crop_History)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.01
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(P.countFControl)[rownames(sigtab), ], "matrix"))
+head(sigtab)
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countCControl <- subset_samples(P.count, Corn_Control == 'Corn_Control')
+
+colnames(tax_table(P.countCControl)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+diagdds = phyloseq_to_deseq2(P.countCControl, ~ Cover_Crop_History)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.01
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(P.countCControl)[rownames(sigtab), ], "matrix"))
+head(sigtab)
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countTControl <- subset_samples(P.count, Tomato_Control == 'Tomato_Control')
+
+colnames(tax_table(P.countTControl)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+diagdds = phyloseq_to_deseq2(P.countTControl, ~ Cover_Crop_History)
+diagdds = DESeq(diagdds, test="Wald", fitType="parametric")
+```
+
+```{r}
+res = results(diagdds, cooksCutoff = FALSE)
+alpha = 0.01
+sigtab = res[which(res$padj < alpha), ]
+sigtab = cbind(as(sigtab, "data.frame"), as(tax_table(P.countTControl)[rownames(sigtab), ], "matrix"))
+head(sigtab)
+```
+
+```{r}
+library("ggplot2")
+theme_set(theme_bw())
+scale_fill_discrete <- function(palname = "Set1", ...) {
+    scale_fill_brewer(palette = palname, ...)
+}
+# Phylum order
+x = tapply(sigtab$log2FoldChange, sigtab$Phylum, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Phylum = factor(as.character(sigtab$Phylum), levels=names(x))
+# Species order
+x = tapply(sigtab$log2FoldChange, sigtab$Species, function(x) max(x))
+x = sort(x, TRUE)
+sigtab$Species = factor(as.character(sigtab$Species), levels=names(x))
+ggplot(sigtab, aes(x=Species, y=log2FoldChange, color=Phylum)) + geom_point(size=6) + 
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust=0.5))
+```
+
+```{r}
+# Load Data
+myPath <- '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC1Data'
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+colnames(tax_table(P.count)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+
+# Subset Data
+P.soil <- subset_samples(P.count, Compartment == 'Bulk_Soil') # soils only
+P.cycle <- subset_samples(P.soil, Crop_Cycle == 'Cover_Crop') # Get just cover_crop time-point
+
+myCrop <- 'Alfalfa'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res1 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm1 <- data.frame(microbiomeMarker::marker_table(res1))
+mm1$Crop <- myCrop
+
+myCrop <- 'Fescue'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res2 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm2 <- data.frame(microbiomeMarker::marker_table(res2))
+mm2$Crop <- myCrop
+
+myCrop <- 'Corn'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res3 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm3 <- data.frame(microbiomeMarker::marker_table(res3))
+mm3$Crop <- myCrop
+
+myCrop <- 'Tomato'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res4 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm4 <- data.frame(microbiomeMarker::marker_table(res4))
+mm4$Crop <- myCrop
+
+myCrop <- 'No_Plant'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res5 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm5 <- data.frame(microbiomeMarker::marker_table(res5))
+mm5$Crop <- myCrop
+```
+
+```{r}
+# merge all marker tables and save
+gDF <- rbind(mm1, mm2, mm3, mm4, mm5)
+write.csv(gDF, paste('Cover_crop.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/gDF.RDS'))
+```
+
+## Create Venn Diagram for microbes enriched in Autoclaved soils
+```{r}
+# read in previous results
+gDF <- read.csv(paste('Cover_crop.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/gDF.RDS'), row.names="X")
+
+selected <- gDF[gDF$enrich_group == 'Autoclaved',]
+
+# Convert the marker table to presence/absence based on a padj value of 0.05
+venn <- selected %>%
+  mutate(sig = case_when(padj <= 0.05 ~ 1,
+                         padj > 0.05 ~ 0)) %>%
+           pivot_wider(.,
+                    id_cols='feature',
+                    names_from='Crop',
+                    values_from='sig',
+                    values_fill=0)
+
+# Convert tibble to data.frame
+venn <- data.frame(venn, row.names='feature')
+
+# Create Venn Diagram
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count',
+set_color = c("Alfalfa" = "darkorchid1", "Fescue" = "chartreuse", "Corn" = "gold", "Tomato" = "firebrick1", "No_Plant" = "grey69"),
+category.names = c("Alfalfa", "Fescue", "Corn", "Tomato", "No Plant")) +
+scale_color_manual(values = c("darkorchid1", "chartreuse", "gold", "firebrick1", "grey69"))
+                              
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.Autoclaved.pdf', sep='/'))
+
+
+# Now remove anything significant in the no_plant
+venn <- venn[venn$No_Plant != 1,]
+venn <- venn[,-5]
+
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count')
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.Autoclaved.crops_only.pdf', sep='/'))
+```
+
+
+## Create Venn Diagram for microbes enriched in NonAutoclaved soils
+```{r}
+selected <- gDF[gDF$enrich_group == 'NonAutoclaved',]
+
+# Convert the marker table to presence/absence based on a padj value of 0.05
+venn <- selected %>%
+  mutate(sig = case_when(padj <= 0.05 ~ 1,
+                         padj > 0.05 ~ 0)) %>%
+           pivot_wider(.,
+                    id_cols='feature',
+                    names_from='Crop',
+                    values_from='sig',
+                    values_fill=0)
+
+# Convert tibble to data.frame
+venn <- data.frame(venn, row.names='feature')
+
+# Create Venn Diagram
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count',
+set_color = c("Alfalfa" = "darkorchid1", "Fescue" = "chartreuse", "Corn" = "gold", "Tomato" = "firebrick1", "No_Plant" = "grey69"),
+category.names = c("Alfalfa", "Fescue", "Corn", "Tomato", "No Plant")) +
+scale_color_manual(values = c("darkorchid1", "chartreuse", "gold", "firebrick1", "grey69"))
+                              
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.NonAutoclavedCC.pdf', sep='/'))
+
+
+# Now remove anything significant in the no_plant
+venn <- venn[venn$No_Plant != 1,]
+venn <- venn[,-5]
+
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count')
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.NonAutoclaved.CC.crops_only.pdf', sep='/'))
+```
+```{r}
+# Load Data
+myPath <- '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC1Data'
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+colnames(tax_table(P.count)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+
+# Subset Data
+P.soil <- subset_samples(P.count, Compartment == 'Bulk_Soil') # soils only
+P.cycle <- subset_samples(P.soil, Compartment_Crop_Type == 'Peach') # Get just cover_crop time-point
+
+myCrop <- 'Alfalfa'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res1 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm1 <- data.frame(microbiomeMarker::marker_table(res1))
+mm1$Crop <- myCrop
+
+myCrop <- 'Fescue'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res2 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm2 <- data.frame(microbiomeMarker::marker_table(res2))
+mm2$Crop <- myCrop
+
+myCrop <- 'Corn'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res3 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm3 <- data.frame(microbiomeMarker::marker_table(res3))
+mm3$Crop <- myCrop
+
+myCrop <- 'Tomato'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res4 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm4 <- data.frame(microbiomeMarker::marker_table(res4))
+mm4$Crop <- myCrop
+
+myCrop <- 'No_Plant'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res5 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm5 <- data.frame(microbiomeMarker::marker_table(res5))
+mm5$Crop <- myCrop
+```
+
+```{r}
+# merge all marker tables and save
+gDFPeach <- rbind(mm1, mm2, mm3, mm4, mm5)
+write.csv(gDFPeach, paste('Cover_crop.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/gDFPeach.RDS'))
+```
+
+## Create Venn Diagram for microbes enriched in Autoclaved Peach soils
+```{r}
+# read in previous results
+gDFPeach <- read.csv(paste('Cover_crop.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/gDFPeach.RDS'), row.names="X")
+
+selected <- gDFPeach[gDFPeach$enrich_group == 'Autoclaved',]
+
+# Convert the marker table to presence/absence based on a padj value of 0.05
+venn <- selected %>%
+  mutate(sig = case_when(padj <= 0.05 ~ 1,
+                         padj > 0.05 ~ 0)) %>%
+           pivot_wider(.,
+                    id_cols='feature',
+                    names_from='Crop',
+                    values_from='sig',
+                    values_fill=0)
+
+# Convert tibble to data.frame
+venn <- data.frame(venn, row.names='feature')
+
+# Create Venn Diagram
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count',
+set_color = c("Alfalfa" = "darkorchid1", "Fescue" = "chartreuse", "Corn" = "gold", "Tomato" = "firebrick1", "No_Plant" = "grey69"),
+category.names = c("Alfalfa", "Fescue", "Corn", "Tomato", "No Plant")) +
+scale_color_manual(values = c("darkorchid1", "chartreuse", "gold", "firebrick1", "grey69"))
+                              
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.Autoclaved.Peach.pdf', sep='/'))
+
+
+# Now remove anything significant in the no_plant
+venn <- venn[venn$No_Plant != 1,]
+venn <- venn[,-5]
+
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count')
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.Autoclaved.Peach.crops_only.pdf', sep='/'))
+```
+
+## Create Venn Diagram for microbes enriched in NonAutoclaved Peach soils
+```{r}
+selected <- gDFPeach[gDFPeach$enrich_group == 'NonAutoclaved',]
+
+# Convert the marker table to presence/absence based on a padj value of 0.05
+venn <- selected %>%
+  mutate(sig = case_when(padj <= 0.05 ~ 1,
+                         padj > 0.05 ~ 0)) %>%
+           pivot_wider(.,
+                    id_cols='feature',
+                    names_from='Crop',
+                    values_from='sig',
+                    values_fill=0)
+
+# Convert tibble to data.frame
+venn <- data.frame(venn, row.names='feature')
+
+# Create Venn Diagram
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count',
+set_color = c("Alfalfa" = "darkorchid1", "Fescue" = "chartreuse", "Corn" = "gold", "Tomato" = "firebrick1", "No_Plant" = "grey69"),
+category.names = c("Alfalfa", "Fescue", "Corn", "Tomato", "No Plant")) +
+scale_color_manual(values = c("darkorchid1", "chartreuse", "gold", "firebrick1", "grey69"))
+                              
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.NonAutoclaved.Peach.pdf', sep='/'))
+
+
+# Now remove anything significant in the no_plant
+venn <- venn[venn$No_Plant != 1,]
+venn <- venn[,-5]
+
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count')
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.NonAutoclaved.Peach.crops_only.pdf', sep='/'))
+```
+
+```{r}
+# Load Data
+myPath <- '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC1Data'
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+colnames(tax_table(P.count)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+
+# Subset Data
+P.soil <- subset_samples(P.count, Compartment == 'Rhizosphere') # soils only
+P.cycle <- subset_samples(P.soil, Compartment_Crop_Type == 'Peach_Rhizosphere') # Get just cover_crop time-point
+
+myCrop <- 'Alfalfa'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res1 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm1 <- data.frame(microbiomeMarker::marker_table(res1))
+mm1$Crop <- myCrop
+
+myCrop <- 'Fescue'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res2 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm2 <- data.frame(microbiomeMarker::marker_table(res2))
+mm2$Crop <- myCrop
+
+myCrop <- 'Corn'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res3 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm3 <- data.frame(microbiomeMarker::marker_table(res3))
+mm3$Crop <- myCrop
+
+myCrop <- 'Tomato'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res4 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm4 <- data.frame(microbiomeMarker::marker_table(res4))
+mm4$Crop <- myCrop
+
+myCrop <- 'No_Plant'
+P.crop <- subset_samples(P.cycle, Cover_Crop_History == myCrop)
+res5 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 0.05)
+mm5 <- data.frame(microbiomeMarker::marker_table(res5))
+mm5$Crop <- myCrop
+```
+
+```{r}
+# merge all marker tables and save
+gDFPeachRhz <- rbind(mm1, mm2, mm3, mm4, mm5)
+write.csv(gDFPeachRhz, paste('Cover_crop.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/gDFPeachRhz.RDS'))
+```
+
+## Create Venn Diagram for microbes enriched in Autoclaved Peach Rhizosphere soils
+```{r}
+# read in previous results
+gDFPeachRhz <- read.csv(paste('Cover_crop.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/gDFPeachRhz.RDS'), row.names="X")
+
+selected <- gDFPeachRhz[gDFPeachRhz$enrich_group == 'Autoclaved',]
+
+# Convert the marker table to presence/absence based on a padj value of 0.05
+venn <- selected %>%
+  mutate(sig = case_when(padj <= 0.05 ~ 1,
+                         padj > 0.05 ~ 0)) %>%
+           pivot_wider(.,
+                    id_cols='feature',
+                    names_from='Crop',
+                    values_from='sig',
+                    values_fill=0)
+
+# Convert tibble to data.frame
+venn <- data.frame(venn, row.names='feature')
+
+# Create Venn Diagram
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count',
+set_color = c("Alfalfa" = "darkorchid1", "Fescue" = "chartreuse", "Corn" = "gold", "Tomato" = "firebrick1", "No_Plant" = "grey69"),
+category.names = c("Alfalfa", "Fescue", "Corn", "Tomato", "No Plant")) +
+scale_color_manual(values = c("darkorchid1", "chartreuse", "gold", "firebrick1", "grey69"))
+                              
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.Autoclaved.PeachRhz.pdf', sep='/'))
+
+
+# Now remove anything significant in the no_plant
+venn <- venn[venn$No_Plant != 1,]
+venn <- venn[,-5]
+
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count')
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.Autoclaved.PeachRhz.crops_only.pdf', sep='/'))
+```
+
+## Create Venn Diagram for microbes enriched in NonAutoclaved Peach Rhizosphere soils
+```{r}
+selected <- gDFPeachRhz[gDFPeachRhz$enrich_group == 'NonAutoclaved',]
+
+# Convert the marker table to presence/absence based on a padj value of 0.05
+venn <- selected %>%
+  mutate(sig = case_when(padj <= 0.05 ~ 1,
+                         padj > 0.05 ~ 0)) %>%
+           pivot_wider(.,
+                    id_cols='feature',
+                    names_from='Crop',
+                    values_from='sig',
+                    values_fill=0)
+
+# Convert tibble to data.frame
+venn <- data.frame(venn, row.names='feature')
+
+# Create Venn Diagram
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count',
+set_color = c("Alfalfa" = "darkorchid1", "Fescue" = "chartreuse", "Corn" = "gold", "Tomato" = "firebrick1", "No_Plant" = "grey69"),
+category.names = c("Alfalfa", "Fescue", "Corn", "Tomato", "No Plant")) +
+scale_color_manual(values = c("darkorchid1", "chartreuse", "gold", "firebrick1", "grey69"))
+                              
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.NonAutoclaved.PeachRhz.pdf', sep='/'))
+
+
+# Now remove anything significant in the no_plant
+venn <- venn[venn$No_Plant != 1,]
+venn <- venn[,-5]
+
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count')
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.NonAutoclaved.PeachRhz.crops_only.pdf', sep='/'))
+```
+
+```{r}
+# Load Data
+myPath <- '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC1Data'
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+colnames(tax_table(P.count)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+
+# Subset Data
+P.soil <- subset_samples(P.count, Compartment == 'Rhizosphere') # soils only
+P.cycle <- subset_samples(P.soil, Compartment_Soil == 'Peach_Rhizosphere_NonAutoclaved') # Get just Peach_Rhizosphere_NonAutoclaved time-point
+
+myCrop <- 'Alfalfa_Control'
+P.crop <- subset_samples(P.cycle, Alfalfa_Control == myCrop)
+res1 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Crop_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 1) # will filter during Venn Diagram
+mm1 <- data.frame(microbiomeMarker::marker_table(res1))
+mm1$Crop <- myCrop
+
+myCrop <- 'Fescue_Control'
+P.crop <- subset_samples(P.cycle, Fescue_Control == myCrop)
+res2 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Crop_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 1)
+mm2 <- data.frame(microbiomeMarker::marker_table(res2))
+mm2$Crop <- myCrop
+
+myCrop <- 'Corn_Control'
+P.crop <- subset_samples(P.cycle, Corn_Control == myCrop)
+res3 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Crop_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 1)
+mm3 <- data.frame(microbiomeMarker::marker_table(res3))
+mm3$Crop <- myCrop
+
+myCrop <- 'Tomato_Control'
+P.crop <- subset_samples(P.cycle, Tomato_Control == myCrop)
+res4 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Crop_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 1)
+mm4 <- data.frame(microbiomeMarker::marker_table(res4))
+mm4$Crop <- myCrop
+```
+
+```{r}
+# merge all marker tables and save
+gDFPeachRhzNonAutoclaved <- rbind(mm1, mm2, mm3, mm4)
+write.csv(gDFPeachRhzNonAutoclaved, paste('Cover_crop.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/gDFPeachRhzNonAutoclaved.RDS'))
+```
+
+## Create Venn Diagram for microbes enriched in Autoclaved Peach Rhizosphere soils
+```{r}
+# read in previous results
+gDFPeachRhzNonAutoclaved <- read.csv(paste('Cover_crop.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/gDFPeachRhzNonAutoclaved.RDS'), row.names="X")
+
+selected <- gDFPeachRhzNonAutoclaved[gDFPeachRhzNonAutoclaved$enrich_group == 'Plant',]
+
+# Convert the marker table to presence/absence based on a padj value of 0.05
+venn <- selected %>%
+  mutate(sig = case_when(padj <= 0.05 ~ 1,
+                         padj > 0.05 ~ 0)) %>%
+           pivot_wider(.,
+                    id_cols='feature',
+                    names_from='Crop',
+                    values_from='sig',
+                    values_fill=0)
+
+# Convert tibble to data.frame
+venn <- data.frame(venn, row.names='feature')
+
+# Create Venn Diagram
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count',
+set_color = c("Alfalfa" = "darkorchid1", "Fescue" = "chartreuse", "Corn" = "gold", "Tomato" = "firebrick1"),
+category.names = c("Alfalfa", "Fescue", "Corn", "Tomato")) +
+scale_color_manual(values = c("darkorchid1", "chartreuse", "gold", "firebrick1"))
+                              
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.Autoclaved.PeachRhzNonAutoclaved.pdf', sep='/'))
+```
+```{r}
+selected <- gDFPeachRhzNonAutoclaved[gDFPeachRhzNonAutoclaved$enrich_group == 'No_Plant',]
+
+# Convert the marker table to presence/absence based on a padj value of 0.05
+venn <- selected %>%
+  mutate(sig = case_when(padj <= 0.05 ~ 1,
+                         padj > 0.05 ~ 0)) %>%
+           pivot_wider(.,
+                    id_cols='feature',
+                    names_from='Crop',
+                    values_from='sig',
+                    values_fill=0)
+
+# Convert tibble to data.frame
+venn <- data.frame(venn, row.names='feature')
+
+# Create Venn Diagram
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count')
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.NonAutoclaved.PeachRhzNoplant.pdf', sep='/'))
+
+
+# Now remove anything significant in the no_plant
+venn <- venn[venn$No_Plant != 1,]
+venn <- venn[,-5]
+
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count',
+set_color = c("Alfalfa" = "darkorchid1", "Fescue" = "chartreuse", "Corn" = "gold", "Tomato" = "firebrick1"),
+category.names = c("Alfalfa", "Fescue", "Corn", "Tomato")) +
+scale_color_manual(values = c("darkorchid1", "chartreuse", "gold", "firebrick1"))
+                              
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.NonAutoclaved.PeachRhz.no_plant.pdf', sep='/'))
+```
+
+```{r}
+gDF
+#write.table(gDF, file = "CCVenn.txt", sep = ",", quote = FALSE, row.names = F)
+```
+```{r}
+gDFPeach
+#write.table(gDFPeach, file = "PeachVenn.txt", sep = ",", quote = FALSE, row.names = F)
+```
+```{r}
+gDFPeachRhz
+#write.table(gDFPeachRhz, file = "PeachRhzVenn.txt", sep = ",", quote = FALSE, row.names = F)
+```
+```{r}
+gDFPeachRhzNonAutoclaved
+#write.table(gDFPeachRhzNonAutoclaved, file = "gDFPeachRhzNonAutoclavedVenn.txt", sep = ",", quote = FALSE, row.names = F)
+```
+```{r}
+# Load Data
+myPath <- '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC1Data'
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+colnames(tax_table(P.count)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+
+# Subset Data
+P.soil <- subset_samples(P.count, Compartment == 'Bulk_Soil') # soils only
+P.cycle <- subset_samples(P.soil, Compartment_Soil == 'Cover_Crop_Autoclaved') # Get just cover_crop time-point
+
+myCrop <- 'Alfalfa_CCA'
+P.crop <- subset_samples(P.cycle, Alfalfa_Control == myCrop)
+res1 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Crop_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 1) # will filter during Venn Diagram
+mm1 <- data.frame(microbiomeMarker::marker_table(res1))
+mm1$Crop <- myCrop
+
+myCrop <- 'Fescue_CCA'
+P.crop <- subset_samples(P.cycle, Fescue_Control == myCrop)
+res2 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Crop_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 1)
+mm2 <- data.frame(microbiomeMarker::marker_table(res2))
+mm2$Crop <- myCrop
+
+myCrop <- 'Corn_CCA'
+P.crop <- subset_samples(P.cycle, Corn_Control == myCrop)
+res3 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Crop_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 1)
+mm3 <- data.frame(microbiomeMarker::marker_table(res3))
+mm3$Crop <- myCrop
+
+myCrop <- 'Tomato_CCA'
+P.crop <- subset_samples(P.cycle, Tomato_Control == myCrop)
+res4 <- microbiomeMarker::run_deseq2(
+           P.crop, 
+           group = "Crop_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           p_adjust = "fdr", # options are none, bonferroni, BH, fdr
+           pvalue_cutoff = 1)
+mm4 <- data.frame(microbiomeMarker::marker_table(res4))
+mm4$Crop <- myCrop
+```
+```{r}
+# read in previous results
+gDFCoverCropAutoclavedByCrop <- read.csv(paste('Cover_crop.DESeq2.results.csv', sep='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/gDFCoverCropAutoclavedByCrop.RDS'), row.names="X")
+
+selected <- gDFCoverCropAutoclavedByCrop[gDFCoverCropAutoclavedByCrop$enrich_group == 'Plant',]
+
+# Convert the marker table to presence/absence based on a padj value of 0.05
+venn <- selected %>%
+  mutate(sig = case_when(padj <= 0.05 ~ 1,
+                         padj > 0.05 ~ 0)) %>%
+           pivot_wider(.,
+                    id_cols='feature',
+                    names_from='Crop',
+                    values_from='sig',
+                    values_fill=0)
+
+# Convert tibble to data.frame
+venn <- data.frame(venn, row.names='feature')
+
+# Create Venn Diagram
+p <- ggVennDiagram(lapply(venn, function(x) which(x == 1)),
+                   label_size = 3, label_alpha = 0, label_color = 'white',
+                   label='count',
+set_color = c("Alfalfa" = "darkorchid1", "Fescue" = "chartreuse", "Corn" = "gold", "Tomato" = "firebrick1"),
+category.names = c("Alfalfa", "Fescue", "Corn", "Tomato")) +
+scale_color_manual(values = c("darkorchid1", "chartreuse", "gold", "firebrick1"))
+                              
+p
+ggsave(p, file=paste(myPath, 'Cover_crop.DESeq2.Venn.Autoclaved.gDFCoverCropAutoclavedByCrop.pdf', sep='/'))
+```

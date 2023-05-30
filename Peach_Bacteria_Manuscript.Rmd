@@ -1,0 +1,1150 @@
+---
+title: "Peach_Bacteria_Manuscript"
+author: "Derek Newberger"
+date: "9/26/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r library, echo=FALSE, message=FALSE, warning=FALSE}
+library(devtools)
+library(dplyr)
+library(ggplot2)
+library(ggthemes)
+library(metacoder)
+library(phyloseq)
+library(MicEco)
+library(reticulate)
+library(RColorBrewer)
+library(readxl)
+library(tidyverse)
+library(vegan)
+library(ggrepel)
+```
+
+```{r libraryBiplot, echo=FALSE, message=FALSE, warning=FALSE}
+library(egg)
+library(SciViews)
+library(dunn.test)
+library(MASS)
+library(car)
+library(emmeans)
+library(multcomp)
+library(multcompView)
+library(knitr)
+library(BiocManager)
+library(DESeq2)
+library(locfit)
+library(microbiomeMarker)
+```
+
+```{r myFunctions_setup, echo=FALSE}
+source("myFunctions.R")
+# If functions not in the same directory as the .Rmd file, open manually and run the code manually
+```
+
+
+```{r import}
+# use custom emu_to_phyloseq function to create phyl
+P.A <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC1Data/EMU.rel_abund.finalCC1.csv',
+                                              meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC1Data/demultiplex_PeachCC1.xlsx', 
+                       sheet='PeachCCA', range='A1:V83',
+                       sample_names='name',
+                       run_name='PeachCCA')
+
+P.B <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC2Data/EMU.rel_abund.finalCC2.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC2Data/demultiplex_CC2.xlsx', 
+                       sheet='PeachCCB', range='A1:V85',
+                       sample_names='name',
+                       run_name='PeachCCB')
+
+P.C <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC3_DD2_Data/EMU.rel_abund.finalCC3.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC3_DD2_Data/demultiplex_CC3.xlsx', 
+                       sheet='PeachCCC', range='A1:V43',
+                       sample_names='name',
+                       run_name='PeachCCC')
+
+P.D <- emu_to_phyloseq(RA_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC4Data/EMU.rel_abund.finalCC4.csv',
+                       meta_file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/Minion_CC4Data/demultiplex_PeachCC4.xlsx', 
+                       sheet='PeachCCD', range='A1:V23',
+                       sample_names='name',
+                       run_name='PeachCCD')
+
+# merge all imported datasets
+P.rel <- merge_phyloseq(P.A, P.B,P.C,P.D)
+```
+
+```{r import2}
+# save combined relative abundance phyloseq object
+saveRDS(P.rel, '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+
+# convert EMU rel abundances to count data using final number of sequence reads
+P.count <- P.rel
+for (n in 1:nsamples(P.count)) {
+  otu_table(P.count)[,n] <- round(otu_table(P.count)[,n] * sample_data(P.count)$final[n], 0)
+}
+
+# save combined count phyloseq object
+saveRDS(P.count, '/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+```
+
+## Control data
+
+```{r rich control data}
+# import phyloseq object created above
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+
+# select zymo controls only
+P.zymos <- subset_samples(P.count, Type == 'Zymo') # type: sample, zymo, blank
+rich <- plot_richness(P.zymos, x="name", measures=c('Observed'))
+rich
+
+# select water controls only
+P.waters <- subset_samples(P.count, Type == 'H2O')
+rich <- plot_richness(P.waters, x="name", measures=c('Observed')) 
+# Observed is literally a type of richness like Shannon
+rich
+
+# select CalEXn controls only
+P.calexn <- subset_samples(P.count, Type == 'CalEXn')
+rich <- plot_richness(P.calexn, x="name", measures=c('Observed')) 
+# Observed is literally a type of richness like Shannon
+rich
+```
+
+```{r rich sample data}
+# select soil samples only
+colnames(P.count)
+P.soils <- subset_samples(P.count, Type == 'Soil' & Compartment_Crop_Type != 'pre')
+P.soils
+
+# summary of sample reads
+summary(sample_sums(P.soils))
+
+# find a suitable cutoff for remove low-read samples
+cutoff <- quantile(sample_sums(P.soils), 0.1)
+cutoff
+
+# remove reads with low sequence numbers (< 1st quantile)
+P.soils <- prune_samples(sample_sums(P.soils) >= cutoff, P.soils)
+P.soils
+
+# richness unrarefied
+rich <- plot_richness(P.soils, x="name", measures=c('Observed'))
+gDF <- rich$data
+
+# richness rarefied
+P.rare <- rarefy_even_depth(P.soils, rngseed=TRUE)
+rich.rare <- plot_richness(P.rare, x="name", measures=c('Observed'))
+gDF.rare <- rich.rare$data
+```
+
+```{r rich fig 1, fig.width=11, fig.height=6, fig.cap="Sequence reads for each trt"}
+# Plot reads by site and library
+p <- ggplot(gDF, aes(x=Compartment_Crop_Type, y=final, fill=Soil_Treatment)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",",
+                                                 scientific = FALSE)) +
+  scale_fill_brewer(palette='Set3') +
+  # facet_grid(Plant ~ Soil) +
+  labs(y='Sequence Reads', x='Treatment') +
+  theme_dan() +
+    theme(axis.text.x = element_text(angle = 45, hjust=1, size=34)) +
+  theme(axis.title=element_text(size=14,face="bold"))
+
+p
+ggsave(p, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Reads_site.eps', width=11, height=6)
+```
+
+```{r rich fig 2, fig.width=11, fig.height=6, fig.cap="Species richness for each trt"}
+# Plot richness by site and library
+p <- ggplot(gDF, aes(x=Compartment_Crop_Type, y=value, fill=Soil_Treatment)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",",
+                                                 scientific = FALSE)) +
+  scale_fill_brewer(palette='Set3') +
+  # facet_grid(Plant ~ Soil) +
+  labs(y='Species Richness', x='') +
+  theme_dan() +
+    theme(axis.text.x = element_text(angle = 45, hjust=1, size=34)) +
+  theme(axis.title=element_text(size=14,face="bold"))
+p
+ggsave(p, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Richness_site.pdf', width=11, height=6)
+```
+
+
+```{r rich fig 2a, fig.width=11, fig.height=6, fig.cap="Species richness for each trt - rarefied."}
+# Plot richness by site and library
+p <- ggplot(gDF.rare, aes(x=Compartment_Crop_Type, y=value, fill=Soil_Treatment)) +
+  geom_boxplot() +
+  scale_y_continuous(labels = function(x) format(x, big.mark = ",",
+                                                 scientific = FALSE)) +
+  scale_fill_brewer(palette='Set3') +
+  # facet_grid(Plant ~ Soil) +
+  labs(y='Species Richness', x='') +
+  theme_dan() +
+  theme(axis.text.x=element_text(angle=90))
+p
+ggsave(p, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Richness_rarefied_site.pdf', width=11, height=6)
+```
+## Estimate Phylum Relative Abundances
+
+```{r rel_abund data 1}
+# import data file
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+
+# remove samples with < 10000 reads
+# P.rel <- subset_samples(P.rel, final >= 10000) # don't know why its not working
+
+# pool by phyla
+rank <- 'phylum'
+P.glom <- phyloseq::tax_glom(P.rel, taxrank=rank, NArm=FALSE)
+
+# Select soils only
+P.soils <- phyloseq::subset_samples(P.glom, Type == 'Soil')
+
+# get top 10 taxa
+TopNOTUs = names(sort(taxa_sums(P.soils), TRUE)[1:10])
+P.10 = phyloseq::prune_taxa(TopNOTUs, P.soils)
+
+# extract all data from phyloseq object
+d <- psmelt(P.10)
+```
+
+```{r rel_abund fig 1, fig.width=11, fig.height=8, fig.cap="Relative abundance by phylum."}
+# order samples by Fertilizer and Rate (using forcats library)
+d$name <- factor(d$name)
+d$Compartment_Crop_Type <- factor(d$Compartment_Crop_Type)
+d$Soil_Treatment <- factor(d$Soil_Treatment)
+d$name <- forcats::fct_reorder2(d$name, d$Compartment_Crop_Type, d$Soil_Treatment)
+
+p <- ggplot(d, aes(x=name, y=Abundance, fill=phylum), color='grey' ) +
+  geom_bar(position='stack', stat='summary', fun='mean') +
+  # facet_wrap(Soil ~ Plant, scales='free') +
+  scale_fill_brewer(palette='Set3', direction=-1) +
+  labs(x='', y='Abundance', fill='') +
+  theme_dan() +
+    theme(axis.text.x = element_text(angle = 90, hjust=1, size=12)) +
+  theme(axis.title=element_text(size=14,face="bold"))
+p
+ggsave(filename='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Phylum.Rel_Abundance.pdf', w=11, h=8, plot=p)
+```
+
+## Principal Coordinates Analysis
+
+```{r pcoa All data 1}
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+P.rel <- subset_samples(P.rel, Type == 'Soil')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.rel))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.rel)))
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Compartment_Crop_Type * Soil_Treatment, data=d)
+#summary(ord)
+
+# perMANOVA test
+adonis2(dist ~  Compartment_Crop_Type * Soil_Treatment, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Soil_Treatment, d$Compartment_Crop_Type))
+mod
+
+
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+
+```{r pcoa All Data fig 1, fig.width=11, fig.height=6, fig.cap="PCoA using species and Bray-Curtis distance."}
+# make graph
+All <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Compartment_Crop_Type, shape=Soil_Treatment), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24,25), labels=c('Autoclaved', 'Non-Autoclaved')) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 5)))) + # change this number based on the error
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  stat_ellipse(aes(group=Soil_Treatment)) +
+  scale_fill_discrete(labels=c('Bulk Soil Control', 'Rotation Crop', 'Rotation Crop Incorporated','Peach','Peach Rhizosphere')) +
+   labs(fill='Crop Phase') +
+  labs(shape='Soil Treatment') +
+  theme_dan() +
+      scale_fill_manual(values = c("Bulk_Soil_Control" = "gray0",
+                               "Cover_Crop" = "green",
+                               "Cover_Crop_Incorporated" = "green4",
+                               "Peach" = "indianred1",
+                               "Peach_Rhizosphere" = "indianred4")) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20))
+All
+ggsave(All, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/CC_Peach_PCoA_All.pdf', width=11, height=6)
+```
+```{r All Data betadisper}
+  mod <- betadisper(dist,d$Soil_Treatment)
+plot(mod, ellipse = TRUE, hull = F)
+mod
+```
+
+```{r pcoa RotationCropBulkSoil}
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+P.CC_BS <- subset_samples(P.rel, Compartment_Crop_Type=='Cover_Crop')
+
+# get meta data
+d <- data.frame(sample_data(P.CC_BS))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.CC_BS)))
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Soil_Treatment * Cover_Crop_History, data=d) # ord_clr for PC
+#summary(ord)
+
+# perMANOVA test
+adonis2(dist ~ Soil_Treatment * Cover_Crop_History, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Cover_Crop_History, d$Soil_Treatment))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+
+```{r pcoa RotationCropBulkSoil Data Set non facet, fig.width=11, fig.height=6, fig.cap="PCoA fig 1A, RotationCropBulkSoil. Using species and Bray-Curtis distance."}
+CC_BS <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Cover_Crop_History, shape=Soil_Treatment),color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(
+    values=c(21,22,23,24,25),
+    labels=c('Autoclaved', 'Non-Autoclaved')) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 1)))) + # change this number based on the error
+  labs(x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  stat_ellipse(aes(group=Soil_Treatment)) +
+  scale_fill_discrete(labels=c('Alfalfa', 'Corn', 'Fescue', 'No Plant', 'Tomato')) +
+   labs(fill='Soil Treatment') +
+  labs(shape='Cover Crop History') +
+  theme_dan() +
+  scale_x_reverse() +
+    scale_fill_manual(values = c("Alfalfa" = "darkorchid1",
+                               "Fescue" = "chartreuse",
+                               "Corn" = "gold",
+                               "Tomato" = "firebrick1",
+                               "None" = "grey69")) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=12), 
+    legend.text=element_text(size=11))
+CC_BS
+ggsave(CC_BS, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/CC_BS_SoilTreatment.pdf', width=11, height=6)
+```
+```{r RotationCropBulkSoil Betadipser}
+  mod <- betadisper(dist,d$Soil_Treatment)
+plot(mod, ellipse = TRUE, hull = F)
+mod
+```
+
+```{r pcoa RotationCropIncorporatedBulkSoil}
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+P.CCI_BS <- subset_samples(P.rel, Compartment_Crop_Type=='Cover_Crop_Incorporated')
+
+# get meta data
+d <- data.frame(sample_data(P.CCI_BS))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.CCI_BS)))
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Soil_Treatment * Cover_Crop_History, data=d)
+#summary(ord)
+
+# perMANOVA test
+adonis2(dist ~ Soil_Treatment * Cover_Crop_History, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Cover_Crop_History, d$Soil_Treatment))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r pcoa RotationCropIncorporatedBulkSoil Data Set non facet, fig.width=11, fig.height=6, fig.cap="PCoA fig 1A, RotationCropIncorporatedBulkSoil. Using species and Bray-Curtis distance."}
+CCI_BS <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Cover_Crop_History, shape=Soil_Treatment), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(
+    values=c(21,22,23,24,25),
+    labels=c('Autoclaved', 'Non-Autoclaved')) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 1)))) + # change this number based on the error
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  stat_ellipse(aes(group=Soil_Treatment)) +
+  scale_fill_discrete(labels=c('Alfalfa', 'Corn', 'Fescue', 'No Plant', 'Tomato')) +
+   labs(fill='Soil Treatment') +
+  labs(shape='Rotation Crop History') +
+  theme_dan() +
+    scale_x_reverse() +
+   scale_y_reverse() +
+      scale_fill_manual(values = c("Alfalfa" = "darkorchid1",
+                               "Fescue" = "chartreuse",
+                               "Corn" = "gold",
+                               "Tomato" = "firebrick1",
+                               "None" = "grey69")) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20))
+CCI_BS
+ggsave(CCI_BS, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/CCI_BS_SoilTreatment.pdf', width=11, height=6)
+```
+```{r RotationCropIncorporatedBulkSoil Betadipser}
+  mod <- betadisper(dist,d$Soil_Treatment)
+plot(mod, ellipse = TRUE, hull = F)
+mod
+```
+```{r pcoa PeachBulkSoil}
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+P.P_BS <- subset_samples(P.rel, Compartment_Crop_Type=='Peach')
+
+# get meta data
+d <- data.frame(sample_data(P.P_BS))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.P_BS)))
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Soil_Treatment * Cover_Crop_History, data=d)
+#summary(ord)
+
+# perMANOVA test
+adonis2(dist ~ Soil_Treatment * Cover_Crop_History, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Cover_Crop_History, d$Soil_Treatment))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+```{r pcoa PeachBulkSoil Data Set non facet, fig.width=11, fig.height=6, fig.cap="PCoA fig 1A, PeachBulkSoil. Using species and Bray-Curtis distance."}
+P_BS <- ggplot(data=axes, aes(x=Axis1, y=Axis2, shape=Soil_Treatment, fill=Cover_Crop_History), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(
+    values=c(21,22,23,24,25),
+    labels=c('Autoclaved', 'Non-Autoclaved')) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 1)))) + # change this number based on the error
+  labs(
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  stat_ellipse(aes(group=Soil_Treatment)) +
+  scale_fill_discrete(labels=c('Alfalfa', 'Corn', 'Fescue', 'No Plant', 'Tomato')) +
+   labs(fill='Cover Crop History') +
+  labs(shape='Soil Treatment') +
+  theme_dan() +
+      scale_fill_manual(values = c("Alfalfa" = "darkorchid1",
+                               "Fescue" = "chartreuse",
+                               "Corn" = "gold",
+                               "Tomato" = "firebrick1",
+                               "None" = "grey69")) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=12), 
+    legend.text=element_text(size=11))
+P_BS
+ggsave(P_BS, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P_BS_SoilTreatment.pdf', width=11, height=6)
+```
+
+```{r PeachBulkSoil Betadipser}
+  mod <- betadisper(dist,d$Soil_Treatment)
+plot(mod, ellipse = TRUE, hull = F)
+mod
+```
+
+```{r pcoa PeachRhizosphere}
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+P.P_Rhz <- subset_samples(P.rel, Compartment_Crop_Type=='Peach_Rhizosphere')
+
+# get meta data
+d <- data.frame(sample_data(P.P_Rhz))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.P_Rhz)))
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Soil_Treatment * Cover_Crop_History, data=d)
+#summary(ord)
+
+#sppscores(ord) <- data
+#biplot <- data.frame(vegan::scores(ord, display='species'))
+#biplot <- biplot[abs(biplot$CAP1) > 0.2 | abs(biplot$CAP2) > 0.2, ] # increase the # to see less
+
+# perMANOVA test
+adonis2(dist ~ Soil_Treatment * Cover_Crop_History, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Cover_Crop_History, d$Soil_Treatment))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r pcoa PeachRhizospherel Data Set non facet, fig.width=11, fig.height=6, fig.cap="PCoA fig 1A, PeachRhizosphere. Using species and Bray-Curtis distance."}
+P_Rhz <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Cover_Crop_History, shape=Soil_Treatment), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(
+    values=c(21,22,23,24,25),
+    labels=c('Autoclaved', 'Non-Autoclaved')) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 1)))) + # change this number based on the error
+  labs(
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  stat_ellipse(aes(group=Soil_Treatment)) +
+  scale_fill_discrete(labels=c('Alfalfa', 'Corn', 'Fescue', 'No Plant', 'Tomato')) +
+   labs(fill='Soil Treatment') +
+  labs(shape='Rotation Crop History') +
+  #geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+  #geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_dan() +
+      scale_fill_manual(values = c("Alfalfa" = "darkorchid1",
+                               "Fescue" = "chartreuse",
+                               "Corn" = "gold",
+                               "Tomato" = "firebrick1",
+                               "None" = "grey69")) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=12), 
+    legend.text=element_text(size=11))
+P_Rhz
+ggsave(P_Rhz, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P_Rhz_SoilTreatment.pdf', width=11, height=6)
+```
+
+```{r PeachRhizosphere betadipser}
+  mod <- betadisper(dist,d$Soil_Treatment)
+plot(mod, ellipse = TRUE, hull = F)
+mod
+```
+```{r All Rhizosphere PCoA}
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+P.relRhizosphere <- subset_samples(P.rel, Compartment == 'Rhizosphere')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relRhizosphere))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relRhizosphere)))
+names(data) <- tax_table(P.relRhizosphere)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Soil_Treatment * Cover_Crop_History, data=d)
+#summary(ord)
+
+sppscores(ord) <- data
+biplot <- data.frame(vegan::scores(ord, display='species'))
+biplot <- biplot[abs(biplot$CAP1) > 0.3 | abs(biplot$CAP2) > 0.3, ] # you can increase the # to see less jazz
+
+# perMANOVA test
+adonis2(dist ~ Soil_Treatment * Cover_Crop_History, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Cover_Crop_History, d$Soil_Treatment))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r biplot All Rhizosphere Data Set, fig.width=11, fig.height=6, fig.cap="PCoA fig 1A, All Rhizosphere Data Set. Using species and Bray-Curtis distance."}
+mult <- 6
+BipoltRhizosphere <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Cover_Crop_History, shape=Soil_Treatment), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23),
+                     labels=c('Autoclaved','Non-Autoclaved' )) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 1)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  scale_color_brewer(palette = 'Set3') +
+   labs(fill='Crop History') +
+  labs(shape='Soil History') +
+  theme_dan() +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+    geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+ geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  # geom_label(aes(label = name)) +
+  theme_few()
+BipoltRhizosphere
+ggsave(BipoltRhizosphere, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/Bipolt_Rhizosphere.pdf', width=11, height=6)
+```
+
+```{r}
+sample_data(P.rel)
+otu_table(P.rel)
+tax_table(P.rel)
+
+P.sub <- subset_samples(P.rel, Type == "Soil")
+P.sub <- subset_taxa(P.sub, species %in% c('Bacillus megaterium'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Bacillus megaterium')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+
+```{r}
+XCropPhaselabs <- c("RS Control","Rotation Crop","Incorporated","Peach","Peach Rhizosphere")
+```
+
+```{r}
+p <- ggplot(df, aes(x=Compartment_Crop_Type, y=`Bacillus megaterium`)) +
+  geom_boxplot(aes(fill=Cover_Crop_History)) +
+  facet_wrap(. ~ Soil_Treatment) +
+   labs(fill='Crop History') +
+      scale_fill_manual(labels=c('Alfalfa', 'Corn','Fescue', 'RS Control','No Crop', 'Tomato'), values = c("Alfalfa" = "darkorchid1",
+                            "Corn" = "gold",
+                            "Fescue" = "chartreuse",
+                            "None" = "grey30",
+                            "Bulk_Soil_Control" = "grey69",
+                            "Tomato" = "firebrick1")) +
+    scale_x_discrete(labels= XCropPhaselabs)
+print(p)
+```
+
+
+```{r}
+sample_data(P.rel)
+otu_table(P.rel)
+tax_table(P.rel)
+
+P.sub <- subset_samples(P.rel, Type == "Soil")
+P.sub <- subset_taxa(P.sub, species %in% c('Sporomusa sphaeroides'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Sporomusa sphaeroides')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Compartment_Crop_Type, y=`Sporomusa sphaeroides`)) +
+  geom_boxplot(aes(fill=Cover_Crop_History)) +
+  facet_wrap(. ~ Soil_Treatment) +
+     labs(fill='Crop History') +
+      scale_fill_manual(labels=c('Alfalfa', 'Corn','Fescue', 'RS Control','No Crop', 'Tomato'), values = c("Alfalfa" = "darkorchid1",
+                            "Corn" = "gold",
+                            "Fescue" = "chartreuse",
+                            "None" = "grey30",
+                            "Bulk_Soil_Control" = "grey69",
+                            "Tomato" = "firebrick1")) +
+    scale_x_discrete(labels= XCropPhaselabs)
+print(p)
+```
+
+```{r}
+sample_data(P.rel)
+otu_table(P.rel)
+tax_table(P.rel)
+
+P.sub <- subset_samples(P.rel, Type == "Soil")
+P.sub <- subset_taxa(P.sub, species %in% c('Clostridium beijerinckii'))
+samp <- data.frame(sample_data(P.sub)) # rows are samples
+samp$sample_name <- row.names(samp)
+
+abund <- as.data.frame(otu_table(P.sub)) # rows are taxa
+abund <- as.data.frame(t(abund)) # rows are samples
+colnames(abund) <- c('Clostridium beijerinckii')
+abund$sample <- row.names(abund)
+
+df <- samp %>%
+  left_join(abund, by=c('sample_name' = 'sample'))
+```
+
+```{r}
+p <- ggplot(df, aes(x=Compartment_Crop_Type, y=`Clostridium beijerinckii`)) +
+  geom_boxplot(aes(fill=Cover_Crop_History)) +
+  facet_wrap(. ~ Soil_Treatment) +
+     labs(fill='Crop History') +
+      scale_fill_manual(labels=c('Alfalfa', 'Corn','Fescue', 'RS Control','No Crop', 'Tomato'), values = c("Alfalfa" = "darkorchid1",
+                            "Corn" = "gold",
+                            "Fescue" = "chartreuse",
+                            "None" = "grey30",
+                            "Bulk_Soil_Control" = "grey69",
+                            "Tomato" = "firebrick1")) +
+    scale_x_discrete(labels= XCropPhaselabs)
+print(p)
+```
+
+```{r CC for Biplot PCoA}
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+P.relCC_BS <- subset_samples(P.rel, Compartment_Crop_Type=='Cover_Crop')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relCC_BS))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relCC_BS)))
+names(data) <- tax_table(P.relCC_BS)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Soil_Treatment * Cover_Crop_History, data=d)
+#summary(ord)
+
+sppscores(ord) <- data
+biplot <- data.frame(vegan::scores(ord, display='species'))
+biplot <- biplot[abs(biplot$CAP1) > 0.3 | abs(biplot$CAP2) > 0.3, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Soil_Treatment * Cover_Crop_History, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Soil_Treatment, d$Cover_Crop_History))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+```{r}
+mult <- 6
+BipoltCC <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Cover_Crop_History, shape=Soil_Treatment), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24,25),
+                     labels=c('Autoclaved','Non-Autoclaved')) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 1)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Soil_Treatment)) +
+   labs(fill='Cover Crop History') +
+  labs(shape='Soil Treatment') +
+        scale_fill_manual(labels=c('Alfalfa', 'Fescue','Corn', 'Tomato','No Crop'), values = c("Alfalfa" = "darkorchid1",
+                               "Fescue" = "chartreuse",
+                               "Corn" = "gold",
+                               "Tomato" = "firebrick1",
+                               "None" = "grey69")) +
+  theme_dan() +
+  xlim(7, -6) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+    geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+ ggrepel::geom_text_repel(data=biplot, max.overlaps = getOption("ggrepel.max.overlaps", default = 20), inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  #geom_text(data=biplot, inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+BipoltCC
+ggsave(BipoltCC, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/BipoltCC.pdf', width=11, height=6)
+```
+```{r CC for Biplot PCoA}
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+P.relCCI_BS <- subset_samples(P.rel, Compartment_Crop_Type=='Cover_Crop_Incorporated')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relCCI_BS))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relCCI_BS)))
+names(data) <- tax_table(P.relCCI_BS)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Soil_Treatment * Cover_Crop_History, data=d)
+#summary(ord)
+
+sppscores(ord) <- data
+biplot <- data.frame(vegan::scores(ord, display='species'))
+biplot <- biplot[abs(biplot$CAP1) > 0.4 | abs(biplot$CAP2) > 0.4, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Soil_Treatment * Cover_Crop_History, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Soil_Treatment, d$Cover_Crop_History))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+mult <- 6
+BipoltCCI <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Cover_Crop_History, shape=Soil_Treatment), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24,25),
+                     labels=c('Autoclaved','Non-Autoclaved' )) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 1)))) +
+  labs(
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+  # scale_color_brewer(palette = 'Set3') +
+    stat_ellipse(aes(group=Soil_Treatment)) +
+   labs(fill='Cover Crop History') +
+  labs(shape='Soil Treatment') +
+        scale_fill_manual(labels=c('Alfalfa', 'Fescue','Corn', 'Tomato','No Crop'), values = c("Alfalfa" = "darkorchid1",
+                               "Fescue" = "chartreuse",
+                               "Corn" = "gold",
+                               "Tomato" = "firebrick1",
+                               "None" = "grey69")) +
+  theme_dan() +
+     xlim(5, -4) +
+   scale_y_reverse() +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=12), 
+    legend.text=element_text(size=11)) +
+    geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+
+  theme_few()
+BipoltCCI
+ggsave(BipoltCCI, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/BipoltCCI.pdf', width=11, height=6)
+```
+```{r CC for Biplot PCoA}
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+P.relPeach_BS <- subset_samples(P.rel, Compartment_Crop_Type=='Peach')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relPeach_BS))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relPeach_BS)))
+names(data) <- tax_table(P.relPeach_BS)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Soil_Treatment * Cover_Crop_History, data=d)
+#summary(ord)
+
+sppscores(ord) <- data
+biplot <- data.frame(vegan::scores(ord, display='species'))
+biplot <- biplot[abs(biplot$CAP1) > 0.1 | abs(biplot$CAP2) > 0.1, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Soil_Treatment * Cover_Crop_History, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Soil_Treatment, d$Cover_Crop_History))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+```
+
+```{r}
+mult <- 6
+BipoltPeach <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Cover_Crop_History, shape=Soil_Treatment), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24,25),
+                     labels=c('Autoclaved','Non-Autoclaved' )) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 1)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Soil_Treatment)) +
+   labs(fill='Cover Crop History') +
+  labs(shape='Soil Treatment') +
+        scale_fill_manual(labels=c('Alfalfa', 'Fescue','Corn', 'Tomato','No Crop'), values = c("Alfalfa" = "darkorchid1",
+                               "Fescue" = "chartreuse",
+                               "Corn" = "gold",
+                               "Tomato" = "firebrick1",
+                               "None" = "grey69")) +
+  theme_dan() +
+     xlim(-6,4) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+    geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+ ggrepel::geom_text_repel(data=biplot, max.overlaps = getOption("ggrepel.max.overlaps", default = 40), inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+BipoltPeach
+ggsave(BipoltPeach, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/BipoltPeach.pdf', width=11, height=6)
+```
+```{r CC for Biplot PCoA}
+P.rel <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.rel.RDS')
+P.relPeach_Rh <- subset_samples(P.rel, Compartment_Crop_Type=='Peach_Rhizosphere')
+
+# remove taxa with column sums = 0, this stopped working for some reason
+# P.rel = filter_taxa(P.rel, function(x) sum(x) > 0, TRUE)
+
+# get meta data
+d <- data.frame(sample_data(P.relPeach_Rh))
+
+# get otu table for calculating distances
+data <- data.frame(t(otu_table(P.relPeach_Rh)))
+names(data) <- tax_table(P.relPeach_Rh)[,'species']
+data <- sqrt(data) # hellinger's transformation (sqrt of rel abund)
+
+# Create distance matrix from PLFA data
+dist <- vegdist(data, method='bray')
+
+# now incorporate the biplot
+# run PCoA for different treatment groups
+ord <- capscale(dist ~ Soil_Treatment * Cover_Crop_History, data=d)
+#summary(ord)
+
+sppscores(ord) <- data
+biplot <- data.frame(vegan::scores(ord, display='species'))
+biplot <- biplot[abs(biplot$CAP1) > 0.4 | abs(biplot$CAP2) > 0.4, ] # increase the # to see less it was at 0.145
+
+# perMANOVA test
+adonis2(dist ~ Soil_Treatment * Cover_Crop_History, data=d, perm=999, by="margin")
+mod <- betadisper(dist, interaction(d$Soil_Treatment, d$Cover_Crop_History))
+mod
+
+### get eigenvalues and proportion explained
+ev <- eigenvals(ord)
+Axis1_exp = round(ev[1] / sum(ev) * 100, 1)
+Axis2_exp = round(ev[2] / sum(ev) * 100, 1)
+
+### get PC axes
+axes <- as.data.frame(vegan::scores(ord, display="sites", choices=c(1:2)))
+names(axes) <- c("Axis1", "Axis2")
+axes <- cbind(d, axes)
+biplot
+```
+```{r}
+mult <- 6
+BipoltPeachRhz <- ggplot(data=axes, aes(x=Axis1, y=Axis2, fill=Cover_Crop_History, shape=Soil_Treatment), color='black') +
+  geom_point(size=6) +
+  scale_shape_manual(values=c(21,22,23,24,25),
+                     labels=c('Autoclaved','Non-Autoclaved' )) +
+  guides(fill = guide_legend(
+    override.aes=list(shape = rep(21, 1)))) +
+  labs(title='PCoA - DNA',
+       subtitle='Bray-Curtis - Species',
+       x=paste0('CAP1 (', Axis1_exp, '%)'), 
+       y=paste0('CAP2 (', Axis2_exp, '%)')) +
+    stat_ellipse(aes(group=Soil_Treatment)) +
+   labs(fill='Cover Crop History') +
+  labs(shape='Soil Treatment') +
+        scale_fill_manual(labels=c('Alfalfa', 'Fescue','Corn', 'Tomato','No Crop'), values = c("Alfalfa" = "darkorchid1",
+                               "Fescue" = "chartreuse",
+                               "Corn" = "gold",
+                               "Tomato" = "firebrick1",
+                               "None" = "grey69")) +
+  theme_dan() +
+    xlim(-10, 6) +
+ theme(plot.title = element_text(size = 26, face = "bold"),
+    legend.title=element_text(size=20), 
+    legend.text=element_text(size=20)) +
+    geom_segment(data=biplot, inherit.aes=F, aes(x=0, xend=mult*CAP1, y=0, yend=mult*CAP2), arrow=arrow(length=unit(0.25, 'cm'))) +
+ ggrepel::geom_text_repel(data=biplot, max.overlaps = getOption("ggrepel.max.overlaps", default = 40), inherit.aes=F, aes(x=mult*CAP1, y=mult*CAP2, label=row.names(biplot))) +
+  theme_few()
+BipoltPeachRhz
+ggsave(BipoltPeachRhz, file='/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/BipoltPeachRhz.pdf', width=11, height=6)
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countType <- subset_samples(P.count, Type == 'Soil')
+
+colnames(tax_table(P.countType)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+Phylum_Soil_Treatment <- microbiomeMarker::run_deseq2(
+           P.countType, 
+           group = "Soil_Treatment",
+           taxa_rank = "Phylum",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Autoclaved", "NonAutoclaved"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+           
+```
+```{r}
+marker_table(Phylum_Soil_Treatment)
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countFnonautoclaved <- subset_samples(P.count, Compartment_Crop_Type == 'Cover_Crop')
+
+colnames(tax_table(P.countFnonautoclaved)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+Phylum_CC_Soil <- microbiomeMarker::run_deseq2(
+           P.countFnonautoclaved, 
+           group = "Soil_Treatment",
+           taxa_rank = "Phylum",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Autoclaved", "NonAutoclaved"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Phylum_CC_Soil)
+```
+
+```{r}
+Species_CC_Soil <- microbiomeMarker::run_deseq2(
+           P.countFnonautoclaved, 
+           group = "Soil_Treatment",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Autoclaved", "NonAutoclaved"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_Soil)
+```
+
+```{r}
+P.count <- readRDS('/Users/derek_newberger/Desktop/Thesis_CSU/Cover_Crop_Peach/CC_R_Auto_Output/P.count.RDS')
+P.countCCnonautoclaved <- subset_samples(P.count, Compartment_Soil == 'Cover_Crop_NonAutoclaved')
+
+colnames(tax_table(P.countCCnonautoclaved)) <- c('Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species')
+```
+
+```{r}
+Species_CC_Nonautoclaved <- microbiomeMarker::run_deseq2(
+           P.countFnonautoclaved, 
+           group = "Cover_Crop_History",
+           taxa_rank = "Species",
+           norm = "RLE", # relative log expression
+           transform = "identity", # no transform, option: "log10", "log10p"
+           contrast = c("Alfalfa", "Tomato"),
+           p_adjust = "BH", # options are none, bonferroni, BH etc
+           pvalue_cutoff = 0.01)
+           
+```
+
+```{r}
+marker_table(Species_CC_Nonautoclaved)
+```
